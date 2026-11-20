@@ -6,14 +6,15 @@
  * Project-local serialization helpers used across the codec/container modules.
  */
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <concepts>
 #include <cstdint>
 #include <cstring>
-#include <meta>
 #include <span>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace cricodecs::io {
@@ -77,9 +78,76 @@ using Bits = std::conditional_t<sizeof(T) == 1, uint8_t,
              std::conditional_t<sizeof(T) == 2, uint16_t,
              std::conditional_t<sizeof(T) == 4, uint32_t, uint64_t>>>;
 
+// Reflection-free replacement for C++26 static reflection.
+//
+// To serialize a plain struct we only need the byte size of each scalar "leaf" in memory
+// order (the structs have no padding, which `EndianSwappable` verifies). LeafProbe converts to
+// any Scalar type and records that type's size. Aggregate initialization with brace elision
+// then expands arrays, std::array and nested structs into their scalar leaves for us.
+namespace detail {
+
+struct LeafProbe {
+    size_t* size_out = nullptr;
+
+    template <typename U>
+        requires Scalar<U>
+    constexpr operator U() const noexcept {
+        if (size_out != nullptr) *size_out = sizeof(U);
+        return U{};
+    }
+};
+
+template <typename T, size_t... Is>
+consteval bool initializable_with_leaves(std::index_sequence<Is...>) {
+    return requires { T{(static_cast<void>(Is), LeafProbe{})...}; };
+}
+
+// Largest N such that T can be initialized from N scalar leaves == number of scalar leaves.
+template <typename T, size_t N = 0>
+consteval size_t leaf_count() {
+    if constexpr (N == sizeof(T)) {
+        return N;
+    } else if constexpr (initializable_with_leaves<T>(std::make_index_sequence<N + 1>{})) {
+        return leaf_count<T, N + 1>();
+    } else {
+        return N;
+    }
+}
+
+// The probes below intentionally rely on brace elision to flatten arrays and nested structs.
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-braces"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-braces"
+#endif
+template <typename T, size_t... Is>
+consteval std::array<size_t, sizeof...(Is)> leaf_sizes_of(std::index_sequence<Is...>) {
+    std::array<size_t, sizeof...(Is)> sizes{};
+    [[maybe_unused]] T value{LeafProbe{&sizes[Is]}...};
+    return sizes;
+}
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
 template <typename T>
-inline constexpr auto data_members = std::define_static_array(
-    std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unprivileged()));
+inline constexpr auto leaf_sizes = leaf_sizes_of<T>(std::make_index_sequence<leaf_count<T>()>{});
+
+// Reverse the bytes of every scalar leaf of T (big <-> little endian) in an object image.
+template <typename T>
+inline void swap_leaves(uint8_t (&bytes)[sizeof(T)]) noexcept {
+    size_t offset = 0;
+    for (const size_t leaf_size : leaf_sizes<T>) {
+        std::reverse(bytes + offset, bytes + offset + leaf_size);
+        offset += leaf_size;
+    }
+}
+
+} // namespace detail
 
 template <typename T>
 struct StdArray;
@@ -104,15 +172,13 @@ consteval size_t serialized_size() {
         return Array::size * serialized_size<typename Array::value_type>();
     } else if constexpr (std::is_aggregate_v<T> && std::is_trivially_copyable_v<T> &&
                          std::is_standard_layout_v<T>) {
+        // Sum of all scalar leaf sizes. Equals sizeof(T) only when the struct has no padding
+        // and every member is a supported scalar, array or nested struct of those.
         size_t size = 0;
-        bool valid = !data_members<T>.empty();
-        template for (constexpr auto member : data_members<T>) {
-            using M = [:std::meta::type_of(member):];
-            constexpr size_t member_size = serialized_size<M>();
-            valid = valid && member_size != 0 && !std::meta::is_bit_field(member);
-            size += member_size;
+        for (const size_t leaf_size : detail::leaf_sizes<T>) {
+            size += leaf_size;
         }
-        return valid ? size : 0;
+        return size;
     } else {
         return 0;
     }
@@ -138,9 +204,11 @@ void read_value(const uint8_t*& source, T& result) noexcept {
     } else if constexpr (StandardArray<T>) {
         for (auto& element : result) read_value<Order>(source, element);
     } else {
-        template for (constexpr auto member : data_members<T>) {
-            read_value<Order>(source, result.[:member:]);
-        }
+        uint8_t bytes[sizeof(T)];
+        std::memcpy(bytes, source, sizeof(T));
+        detail::swap_leaves<T>(bytes);
+        std::memcpy(&result, bytes, sizeof(T));
+        source += sizeof(T);
     }
 }
 
@@ -161,9 +229,11 @@ void write_value(uint8_t*& destination, const T& value) noexcept {
     } else if constexpr (StandardArray<T>) {
         for (const auto& element : value) write_value<Order>(destination, element);
     } else {
-        template for (constexpr auto member : data_members<T>) {
-            write_value<Order>(destination, value.[:member:]);
-        }
+        uint8_t bytes[sizeof(T)];
+        std::memcpy(bytes, &value, sizeof(T));
+        detail::swap_leaves<T>(bytes);
+        std::memcpy(destination, bytes, sizeof(T));
+        destination += sizeof(T);
     }
 }
 
