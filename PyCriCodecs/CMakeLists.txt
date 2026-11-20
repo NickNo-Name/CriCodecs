@@ -5,21 +5,27 @@ endif()
 set(cricodecs_python_root_dir "${PROJECT_BINARY_DIR}/python")
 set(cricodecs_python_package_dir "${cricodecs_python_root_dir}/cricodecs")
 
-find_package(Python 3.9
-    REQUIRED COMPONENTS Interpreter Development.Module
-    OPTIONAL_COMPONENTS Development.SABIModule
-)
+if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    # Pyodide cross-build: only locate the target's Python headers.
+    find_package(Python 3.9 REQUIRED COMPONENTS Development.Module)
+else()
+    find_package(Python 3.9
+        REQUIRED COMPONENTS Interpreter Development.Module
+        OPTIONAL_COMPONENTS Development.SABIModule
+    )
+endif()
 
-execute_process(
-    COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
-    RESULT_VARIABLE cricodecs_nanobind_status
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    OUTPUT_VARIABLE cricodecs_nanobind_root
-    ERROR_QUIET
-)
-
-if(cricodecs_nanobind_status EQUAL 0)
-    list(APPEND CMAKE_PREFIX_PATH "${cricodecs_nanobind_root}")
+if(Python_EXECUTABLE)
+    execute_process(
+        COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
+        RESULT_VARIABLE cricodecs_nanobind_status
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        OUTPUT_VARIABLE cricodecs_nanobind_root
+        ERROR_QUIET
+    )
+    if(cricodecs_nanobind_status EQUAL 0)
+        list(APPEND CMAKE_PREFIX_PATH "${cricodecs_nanobind_root}")
+    endif()
 endif()
 
 find_package(nanobind CONFIG REQUIRED)
