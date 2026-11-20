@@ -196,7 +196,7 @@ function(cricodecs_add_library target_name)
     endif()
 
     find_package(Threads REQUIRED)
-    target_compile_features(${target_name} PUBLIC cxx_std_26)
+    target_compile_features(${target_name} PUBLIC cxx_std_23)
     target_compile_options(${target_name} PUBLIC
         $<$<COMPILE_LANG_AND_ID:CXX,GNU>:-freflection>
     )
