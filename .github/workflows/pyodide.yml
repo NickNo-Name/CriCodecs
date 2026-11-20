@@ -11,7 +11,7 @@ jobs:
         env:
           CIBW_PLATFORM: pyodide
           CIBW_BUILD: "cp313-pyodide_wasm32"
-          CIBW_PYODIDE_VERSION: "0.29.4"
+          CIBW_PYODIDE_VERSION: "0.28.3"
           CIBW_CONFIG_SETTINGS: "cmake.define.CRICODECS_BUILD_CLI=OFF"
           CIBW_BUILD_VERBOSITY: 1
 
