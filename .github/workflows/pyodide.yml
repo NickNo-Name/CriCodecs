@@ -6,12 +6,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pypa/cibuildwheel@v3.2   # check the cibuildwheel releases page for the latest tag
+
+      - uses: pypa/cibuildwheel@v3.2
         env:
           CIBW_PLATFORM: pyodide
-          # Skip the CLI; the wasm wheel only needs the Python extension
+          CIBW_PYODIDE_VERSION: "0.29.5"
           CIBW_CONFIG_SETTINGS: "cmake.define.CRICODECS_BUILD_CLI=OFF"
+          CIBW_BUILD_VERBOSITY: 1
+
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: pyodide-wheel
           path: wheelhouse/*.whl
+          if-no-files-found: warn
