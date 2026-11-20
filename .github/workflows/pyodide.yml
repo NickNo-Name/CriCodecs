@@ -1,0 +1,17 @@
+name: Build Pyodide wheel
+on: workflow_dispatch
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pypa/cibuildwheel@v3.2   # check the cibuildwheel releases page for the latest tag
+        env:
+          CIBW_PLATFORM: pyodide
+          # Skip the CLI; the wasm wheel only needs the Python extension
+          CIBW_CONFIG_SETTINGS: "cmake.define.CRICODECS_BUILD_CLI=OFF"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pyodide-wheel
+          path: wheelhouse/*.whl
